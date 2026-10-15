@@ -13,19 +13,69 @@ const fmt=n=>n===null||!Number.isFinite(n)?'–':n.toFixed(1).replace('.',',')+'
 const status=(message,error=false)=>{$('busy').textContent=message;$('busy').className=error?'error':'';};
 function authStatus(message){$('authStatus').textContent=message;}
 function init(){
- $('clientId').value=clientId;$('folder').value=folder;$('redirect').textContent=redirect;
- $('login').onclick=login;$('logout').onclick=logout;
- $('saveClient').onclick=()=>{clientId=$('clientId').value.trim();localStorage.setItem('litmerk_client_id',clientId);status('ID shranjen. Zdaj klikni Prijava OneDrive.')};
- $('saveFolder').onclick=()=>{folder=$('folder').value.trim().replace(/^\/+|\/+$/g,'');localStorage.setItem('litmerk_folder',folder);if(token)listFiles()};
- $('copyRedirect').onclick=()=>navigator.clipboard.writeText(redirect).then(()=>status('Naslov kopiran.'));
- $('year').onchange=fillMonths;$('month').onchange=loadMonth;
- $('prev').onclick=()=>chooseDay(selectedDay-1);$('next').onclick=()=>chooseDay(selectedDay+1);
- $('day').oninput=e=>chooseDay(+e.target.value);
- const cv=$('chart');cv.addEventListener('pointerdown',pointerDay);cv.addEventListener('pointermove',e=>{if(e.buttons)pointerDay(e)});
- window.addEventListener('resize',()=>requestAnimationFrame(draw));
- if('serviceWorker' in navigator && location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(()=>{});
- handleReturn().then(()=>{if(token||refreshToken)listFiles().catch(e=>status(e.message,true));else if(clientId)status('Klikni Prijava OneDrive za povezavo.');}).catch(e=>status('Prijava ni uspela: '+e.message,true));
+  $('clientId').value='';
+  $('folder').value='Javna mapa OneDrive – preizkus';
+  $('redirect').textContent=location.href;
+  $('login').textContent='Ponovi preizkus';
+  $('login').hidden=false;
+  $('logout').hidden=true;
+  $('login').onclick=testPublicAccess;
+  $('saveClient').onclick=testPublicAccess;
+  $('saveFolder').onclick=testPublicAccess;
+  $('copyRedirect').onclick=()=>navigator.clipboard.writeText(location.href);
+  $('year').onchange=fillMonths;
+  $('month').onchange=loadMonth;
+  $('prev').onclick=()=>chooseDay(selectedDay-1);
+  $('next').onclick=()=>chooseDay(selectedDay+1);
+  $('day').oninput=e=>chooseDay(+e.target.value);
+  const cv=$('chart');
+  cv.addEventListener('pointerdown',pointerDay);
+  cv.addEventListener('pointermove',e=>{if(e.buttons)pointerDay(e)});
+  window.addEventListener('resize',()=>requestAnimationFrame(draw));
+  // Test version: do not register the old service worker; it can cache old app.js.
+  if('serviceWorker' in navigator)navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
+  $('year').disabled=true;
+  $('month').disabled=true;
+  authStatus('Preizkus javnega OneDrive – brez prijave');
+  testPublicAccess();
 }
+
+const publicFolderUrl='https://1drv.ms/f/c/6b7b0d9f7d430038/IgA1jcv4_lNYQrfprjorjUcSAR-yexRZA7rjqCsBzU-LC4w?e=7Y38uv';
+const publicFileUrl='https://1drv.ms/t/c/6b7b0d9f7d430038/IQBhCMSMONj2SLdcZoHrbCh5AfLzSP4QaqlonIwPVXOsU2w?e=AH6Goq';
+function shareId(url){const bytes=new TextEncoder().encode(url);let raw='';for(const b of bytes)raw+=String.fromCharCode(b);return 'u!'+btoa(raw).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+async function probe(label,url){
+  try{
+    const r=await fetch(url,{method:'GET',mode:'cors',redirect:'follow',cache:'no-store'});
+    const type=r.headers.get('content-type')||'neznan';
+    if(!r.ok)return label+': HTTP '+r.status+' ('+type+')';
+    const body=await r.text();
+    const isTxt=body.includes('Ts_min')&&body.includes('Ts_max');
+    return label+': HTTP '+r.status+', '+type+', '+body.length+' znakov'+(isTxt?' – PREBRANI TEMPERATURNI PODATKI':' – ni potrjena vsebina TXT');
+  }catch(e){return label+': brskalnik je blokiral branje ('+e.message+'). Možen vzrok: CORS.'}
+}
+async function testPublicAccess(){
+  status('Preverjam javne povezave OneDrive ...');
+  const checks=[
+    ['Javna povezava TXT',publicFileUrl],
+    ['Javna povezava TXT ?download=1',publicFileUrl+'&download=1'],
+    ['OneDrive API – posamezna datoteka','https://api.onedrive.com/v1.0/shares/'+shareId(publicFileUrl)+'/root/content'],
+    ['OneDrive API – seznam mape','https://api.onedrive.com/v1.0/shares/'+shareId(publicFolderUrl)+'/root/children']
+  ];
+  const results=[];
+  for(const [name,url] of checks){
+    results.push(await probe(name,url));
+    status('Preverjeno '+results.length+' od '+checks.length+' povezav ...');
+  }
+  const report='PREIZKUS DOSTOPA DO ONEDRIVE\n\n'+results.join('\n\n')+'\n\nČe se izpiše CORS ali HTTP napaka, to še ne pomeni, da javna povezava v brskalniku ne deluje. Pomeni, da spletna aplikacija podatkov po tej poti ne more samodejno prebrati.';
+  $('statsTitle').textContent='REZULTAT PREIZKUSA';
+  $('stats').textContent=report;
+  $('stats').style.whiteSpace='pre-wrap';
+  $('stats').style.overflowWrap='anywhere';
+  authStatus('Preizkus končan – rezultat je spodaj');
+  status('Preizkus končan. Pošlji mi posnetek zaslona rezultata.');
+  console.log(report);
+}
+
 function b64url(bytes){return btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
 function randomString(){const b=new Uint8Array(32);crypto.getRandomValues(b);return b64url(b)}
 async function login(){
@@ -117,7 +167,7 @@ function pointerDay(e){if(!rows.length)return;const r=$('chart').getBoundingClie
 function draw(){
  const c=$('chart'),r=c.getBoundingClientRect();if(!r.width||!r.height)return;const dpr=Math.min(2,devicePixelRatio||1);c.width=Math.round(r.width*dpr);c.height=Math.round(r.height*dpr);const ctx=c.getContext('2d');ctx.scale(dpr,dpr);
  const w=r.width,h=r.height,L=49,R=14,T=15,B=34,pw=Math.max(10,w-L-R),ph=Math.max(10,h-T-B);
- ctx.clearRect(0,0,w,h);if(!rows.length){ctx.fillStyle='#6b7890';ctx.textAlign='center';ctx.fillText('Poveži OneDrive in izberi mesec',w/2,h/2);return}
+ ctx.clearRect(0,0,w,h);if(!rows.length){ctx.fillStyle='#6b7890';ctx.textAlign='center';ctx.fillText('Preizkus povezave OneDrive',w/2,h/2);return}
  let lo=Infinity,hi=-Infinity;for(const row of rows)for(const s of sensors)for(const k of [s[2],s[3]])if(row[k]!==null){lo=Math.min(lo,row[k]);hi=Math.max(hi,row[k])}if(!Number.isFinite(lo)){lo=0;hi=40}lo=Math.floor(lo-1);hi=Math.ceil(hi+1);if(hi===lo)hi=lo+1;
  const days=new Date(year,month,0).getDate(),px=day=>L+(day-1)/(days-1)*pw,py=v=>T+(hi-v)/(hi-lo)*ph;
  ctx.font='12px system-ui';ctx.lineWidth=1;ctx.textAlign='right';for(let i=0;i<=5;i++){const v=lo+(hi-lo)*i/5,y=py(v);ctx.strokeStyle='#e4eaf2';ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(w-R,y);ctx.stroke();ctx.fillStyle='#53657b';ctx.fillText(v.toFixed(0)+'°',L-6,y+4)}
