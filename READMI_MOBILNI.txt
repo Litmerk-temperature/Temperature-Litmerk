@@ -1,0 +1,78 @@
+TEMPERATURE LITMERK – MOBILNA RAZLIČICA (osnutek za prvo namestitev)
+============================================================
+
+NAMEN
+- Windows TemperatureViewer.hta ostane tak, kot je.
+- TXT datoteke še naprej kopirate samo v:
+  I:\OneDrive\Sluzba\Temperature_Litmerk\meseci\
+- Telefon dostopa do istih datotek prek vašega OSEBNEGA OneDrive.
+- Na telefonu je graf, dnevni MIN/MAX, mesečni MIN/MAX in datumi.
+- V aplikaciji ni zunanjih JavaScript knjižnic. Za povezavo z OneDrive
+  uporablja Microsoftov prijavni sistem in Microsoft Graph API.
+
+POMEMBNO
+Datoteke v tem ZIP-u so pripravljena aplikacija, NISO pa že objavljene
+na spletu. Za delovanje na telefonu od koderkoli sta potrebna:
+  1) spletni naslov HTTPS, na katerem gostujejo datoteke aplikacije;
+  2) registracija aplikacije pri Microsoftu (Application/client ID).
+Ne uporabljajte datoteke index.html neposredno iz OneDrive kot
+nadomestilo za HTTPS gostovanje: prijava na ta način ne deluje.
+
+PRIMER OBJAVE BREZ NAMEŠČANJA DODATNIH PROGRAMOV – GITHUB PAGES
+1. Ustvarite (ali uporabite obstoječ) račun na github.com.
+2. Ustvarite novo JAVNO skladišče npr. temperature-litmerk.
+   Javno bodo vidne le datoteke aplikacije, NE vaše temperaturne TXT datoteke.
+3. V koren skladišča naložite vse datoteke iz tega ZIP-a
+   (index.html, app.js, sw.js, manifest.webmanifest, obe ikoni).
+   Nikakor ne nalagajte mape meseci ali gesel/žetonov.
+4. Settings -> Pages -> Deploy from a branch -> main -> /(root) -> Save.
+5. Počakajte, da se pojavi naslov oblike
+   https://UPORABNIK.github.io/temperature-litmerk/
+6. Ta naslov odprite v Chromu na telefonu.
+
+MICROSOFT PRIJAVA
+1. Odprite Microsoft Entra admin center: https://entra.microsoft.com/
+   (potrebujete račun/imenik z dovoljenjem za registracijo aplikacij).
+2. App registrations -> New registration.
+3. Ime: Temperature Litmerk.
+4. Supported account types: Personal Microsoft accounts only
+   (oziroma možnost, ki vključuje osebne Microsoftove račune).
+5. V Authentication dodajte platformo Single-page application (SPA).
+6. Redirect URI mora biti natanko spletni naslov aplikacije, npr.
+   https://UPORABNIK.github.io/temperature-litmerk/
+7. V API permissions dodajte Microsoft Graph -> Delegated -> Files.Read.
+   Dovoljenje omogoča branje uporabnikovih datotek, ne pisanja.
+8. Iz Overview kopirajte Application (client) ID.
+9. Odprite objavljeno aplikacijo na telefonu, razširite
+   'Nastavitve povezave OneDrive', vnesite Client ID, kliknite Shrani.
+10. Kliknite Prijava OneDrive, prijavite se z ISTIM osebnim Microsoftovim
+    računom kot v Windows OneDrive, in odobrite dovoljenje za branje.
+11. Če je pot v OneDrive drugačna, jo popravite v nastavitvah.
+
+OPOMBA: Če osebni Microsoftov račun nima dostopa do registracije aplikacij,
+bo treba urediti ustrezen Microsoft Entra imenik ali drugo vrsto
+prijavne infrastrukture. To ni napaka programa.
+
+IKONA NA TELEFONU (Chrome / Android)
+- Odprite spletno aplikacijo prek HTTPS.
+- Meni Chrome (tri pike) -> Dodaj na začetni zaslon / Namesti aplikacijo.
+- Na začetnem zaslonu se pojavi TEMPERATURE LITMERK.
+
+VARNOST IN SAMODEJNA PRIJAVA
+- Geslo ni nikoli shranjeno v programu.
+- Brskalnik lokalno shrani osvežitveni prijavni žeton, da ni treba
+  prijavljanja ob vsakem zagonu. Microsoft lahko občasno zahteva
+  ponovno prijavo (pri SPA je življenjska doba osvežitvenega žetona
+  omejena, pogosto na približno 24 ur).
+- Ne uporabljajte aplikacije na tujih/javnih napravah.
+- Če želite preklicati dostop, ga lahko odstranite v nastavitvah
+  svojega Microsoftovega računa.
+- Podatki v mapi meseci ostanejo zasebni; javno je le programsko ogrodje.
+
+OMEJITVE IN PREIZKUS
+- Povezava z vašim računom še NI bila preizkušena, ker nimamo
+  vašega Microsoftovega dovoljenja, registriranega Client ID ali
+  objavljenega spletnega naslova.
+- Če Microsoftova prijava ali dovoljenja niso omogočena, bo aplikacija
+  javila napako. Nadaljnja nastavitev se lahko izvede po prvem preizkusu.
+- Pri uporabi v tujini potrebujete internetno povezavo.
