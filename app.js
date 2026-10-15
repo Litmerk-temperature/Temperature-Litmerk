@@ -3,26 +3,12 @@
 const $=id=>document.getElementById(id);
 const sensors=[['Ts','soba','Ts_min','Ts_max','#4169e1'],['Tz','zunanja','Tz_min','Tz_max','#dc143c'],['Tm','mansarda','Tm_min','Tm_max','#228b22'],['Tg','garaža','Tg_min','Tg_max','#9400d3'],['Twc','sanitarije','Twc_min','Twc_max','#ff8c00']];
 const months=['','januar','februar','marec','april','maj','junij','julij','avgust','september','oktober','november','december'];
-const scope='openid profile offline_access Files.Read';
-const redirect=location.origin+location.pathname;
-const authority='https://login.microsoftonline.com/consumers/oauth2/v2.0';
-let files=[], rows=[], year=0,month=0,selectedDay=1, token=null,tokenExpiry=0,refreshToken=null, loginBusy=false;
-let clientId=localStorage.getItem('litmerk_client_id')||'';
-let folder=localStorage.getItem('litmerk_folder')||'Sluzba/Temperature_Litmerk/meseci';
+const githubApi='https://api.github.com/repos/Litmerk-temperature/Temperature-Litmerk/contents/meseci';
+const githubRaw='https://raw.githubusercontent.com/Litmerk-temperature/Temperature-Litmerk/main/meseci/';
+let files=[], rows=[], year=0,month=0,selectedDay=1;
 const fmt=n=>n===null||!Number.isFinite(n)?'–':n.toFixed(1).replace('.',',')+' °C';
 const status=(message,error=false)=>{$('busy').textContent=message;$('busy').className=error?'error':'';};
-function authStatus(message){$('authStatus').textContent=message;}
 function init(){
-  $('clientId').value='';
-  $('folder').value='Javna mapa OneDrive – preizkus';
-  $('redirect').textContent=location.href;
-  $('login').textContent='Ponovi preizkus';
-  $('login').hidden=false;
-  $('logout').hidden=true;
-  $('login').onclick=testPublicAccess;
-  $('saveClient').onclick=testPublicAccess;
-  $('saveFolder').onclick=testPublicAccess;
-  $('copyRedirect').onclick=()=>navigator.clipboard.writeText(location.href);
   $('year').onchange=fillMonths;
   $('month').onchange=loadMonth;
   $('prev').onclick=()=>chooseDay(selectedDay-1);
@@ -32,102 +18,28 @@ function init(){
   cv.addEventListener('pointerdown',pointerDay);
   cv.addEventListener('pointermove',e=>{if(e.buttons)pointerDay(e)});
   window.addEventListener('resize',()=>requestAnimationFrame(draw));
-  // Test version: do not register the old service worker; it can cache old app.js.
-  if('serviceWorker' in navigator)navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
-  $('year').disabled=true;
-  $('month').disabled=true;
-  authStatus('Preizkus javnega OneDrive – brez prijave');
-  testPublicAccess();
+  if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  listFiles();
 }
-
-const publicFolderUrl='https://1drv.ms/f/c/6b7b0d9f7d430038/IgA1jcv4_lNYQrfprjorjUcSAR-yexRZA7rjqCsBzU-LC4w?e=7Y38uv';
-const publicFileUrl='https://1drv.ms/t/c/6b7b0d9f7d430038/IQBhCMSMONj2SLdcZoHrbCh5AfLzSP4QaqlonIwPVXOsU2w?e=AH6Goq';
-function shareId(url){const bytes=new TextEncoder().encode(url);let raw='';for(const b of bytes)raw+=String.fromCharCode(b);return 'u!'+btoa(raw).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
-async function probe(label,url){
-  try{
-    const r=await fetch(url,{method:'GET',mode:'cors',redirect:'follow',cache:'no-store'});
-    const type=r.headers.get('content-type')||'neznan';
-    if(!r.ok)return label+': HTTP '+r.status+' ('+type+')';
-    const body=await r.text();
-    const isTxt=body.includes('Ts_min')&&body.includes('Ts_max');
-    return label+': HTTP '+r.status+', '+type+', '+body.length+' znakov'+(isTxt?' – PREBRANI TEMPERATURNI PODATKI':' – ni potrjena vsebina TXT');
-  }catch(e){return label+': brskalnik je blokiral branje ('+e.message+'). Možen vzrok: CORS.'}
-}
-async function testPublicAccess(){
-  status('Preverjam javne povezave OneDrive ...');
-  const checks=[
-    ['Javna povezava TXT',publicFileUrl],
-    ['Javna povezava TXT ?download=1',publicFileUrl+'&download=1'],
-    ['OneDrive API – posamezna datoteka','https://api.onedrive.com/v1.0/shares/'+shareId(publicFileUrl)+'/root/content'],
-    ['OneDrive API – seznam mape','https://api.onedrive.com/v1.0/shares/'+shareId(publicFolderUrl)+'/root/children']
-  ];
-  const results=[];
-  for(const [name,url] of checks){
-    results.push(await probe(name,url));
-    status('Preverjeno '+results.length+' od '+checks.length+' povezav ...');
-  }
-  const report='PREIZKUS DOSTOPA DO ONEDRIVE\n\n'+results.join('\n\n')+'\n\nČe se izpiše CORS ali HTTP napaka, to še ne pomeni, da javna povezava v brskalniku ne deluje. Pomeni, da spletna aplikacija podatkov po tej poti ne more samodejno prebrati.';
-  $('statsTitle').textContent='REZULTAT PREIZKUSA';
-  $('stats').textContent=report;
-  $('stats').style.whiteSpace='pre-wrap';
-  $('stats').style.overflowWrap='anywhere';
-  authStatus('Preizkus končan – rezultat je spodaj');
-  status('Preizkus končan. Pošlji mi posnetek zaslona rezultata.');
-  console.log(report);
-}
-
-function b64url(bytes){return btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
-function randomString(){const b=new Uint8Array(32);crypto.getRandomValues(b);return b64url(b)}
-async function login(){
- if(!clientId){document.querySelector('.settings').open=true;status('Najprej vnesi Application (client) ID.',true);return}
- const verifier=randomString(),state=randomString();sessionStorage.setItem('litmerk_pkce',verifier);sessionStorage.setItem('litmerk_state',state);
- const challenge=b64url(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier)));
- const u=new URL(authority+'/authorize');Object.entries({client_id:clientId,response_type:'code',redirect_uri:redirect,response_mode:'query',scope,code_challenge:challenge,code_challenge_method:'S256',state}).forEach(([k,v])=>u.searchParams.set(k,v));
- location.assign(u.href);
-}
-async function handleReturn(){
- const q=new URLSearchParams(location.search);
- if(q.has('error')){history.replaceState(null,'',redirect);throw new Error(q.get('error_description')||q.get('error'))}
- if(q.has('code')){
-  const expected=sessionStorage.getItem('litmerk_state'),verifier=sessionStorage.getItem('litmerk_pkce');
-  if(!expected||q.get('state')!==expected||!verifier)throw new Error('Varnostna preverba prijave ni uspela.');
-  sessionStorage.removeItem('litmerk_state');sessionStorage.removeItem('litmerk_pkce');
-  history.replaceState(null,'',redirect);
-  await exchange({grant_type:'authorization_code',code:q.get('code'),code_verifier:verifier,redirect_uri:redirect});
- }else{
-  refreshToken=localStorage.getItem('litmerk_refresh')||null;
-  if(refreshToken){try{await renew()}catch(e){refreshToken=null;localStorage.removeItem('litmerk_refresh');authStatus('Potrebna prijava')}}
- }
-}
-async function exchange(params){
- const body=new URLSearchParams(Object.assign({client_id:clientId,scope},params));
- const r=await fetch(authority+'/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
- const j=await r.json();if(!r.ok)throw new Error(j.error_description||j.error||'Napaka pri prijavi');
- token=j.access_token;tokenExpiry=Date.now()+(j.expires_in-90)*1000;
- if(j.refresh_token){refreshToken=j.refresh_token;localStorage.setItem('litmerk_refresh',refreshToken)}
- authStatus('OneDrive povezan');$('login').hidden=true;$('logout').hidden=false;
-}
-async function renew(){if(!refreshToken)throw new Error('Potrebna ponovna prijava');await exchange({grant_type:'refresh_token',refresh_token:refreshToken})}
-async function access(){if(!token||Date.now()>tokenExpiry)await renew();return token}
-function logout(){token=null;refreshToken=null;localStorage.removeItem('litmerk_refresh');authStatus('Odjavljen');$('login').hidden=false;$('logout').hidden=true;files=[];rows=[];$('year').disabled=true;$('month').disabled=true;status('Odjavljen.');draw();}
-async function graph(path){
- let r=await fetch('https://graph.microsoft.com/v1.0'+path,{headers:{Authorization:'Bearer '+await access()}});
- if(r.status===401){await renew();r=await fetch('https://graph.microsoft.com/v1.0'+path,{headers:{Authorization:'Bearer '+await access()}})}
- if(!r.ok){let err;try{err=(await r.json()).error.message}catch{}throw new Error(err||'OneDrive: HTTP '+r.status)}
- return r;
-}
-const encodedPath=()=>folder.split('/').filter(Boolean).map(encodeURIComponent).join('/');
 async function listFiles(){
- if(!clientId){status('Najprej nastavi ID aplikacije.',true);return}
- status('Berem seznam mesecev iz OneDrive ...');files=[];
- try{
- let next='/me/drive/root:/'+encodedPath()+':/children?$select=id,name,file&$top=200';
- while(next){const j=await(await graph(next)).json();for(const f of j.value||[]){const m=/^(\d{2})_(\d{1,2})TEM\.TXT$/i.exec(f.name);if(m&&f.file){const mm=+m[2];if(mm>=1&&mm<=12)files.push({year:2000+(+m[1]),month:mm,id:f.id,name:f.name})}}next=j['@odata.nextLink']||null;if(next)next=next.replace('https://graph.microsoft.com/v1.0','')}
- files.sort((a,b)=>a.year-b.year||a.month-b.month);
- const y=$('year');y.innerHTML='';[...new Set(files.map(f=>f.year))].forEach(n=>y.add(new Option(n,n)));
- if(!files.length){status('V mapi ni datotek oblike 26_8TEM.TXT.',true);return}
- y.disabled=false;y.value=String(files[files.length-1].year);fillMonths();
- }catch(e){authStatus('Napaka povezave');status('Ne morem prebrati mape: '+e.message,true)}
+  status('Berem seznam mesecev z GitHuba ...');files=[];
+  try{
+    const r=await fetch(githubApi,{cache:'no-store',headers:{'Accept':'application/vnd.github+json'}});
+    if(!r.ok)throw new Error('GitHub HTTP '+r.status);
+    const entries=await r.json();
+    if(!Array.isArray(entries))throw new Error('GitHub ni vrnil seznama datotek.');
+    for(const f of entries){
+      const m=/^(\d{2})_(\d{1,2})TEM\.TXT$/i.exec(f.name||'');
+      if(!m||f.type!=='file')continue;
+      const mm=+m[2];if(mm<1||mm>12)continue;
+      files.push({year:2000+(+m[1]),month:mm,name:f.name});
+    }
+    files.sort((a,b)=>a.year-b.year||a.month-b.month);
+    const y=$('year');y.innerHTML='';
+    [...new Set(files.map(f=>f.year))].forEach(n=>y.add(new Option(n,n)));
+    if(!files.length)throw new Error('Ni datotek oblike 26_8TEM.TXT.');
+    y.disabled=false;y.value=String(files[files.length-1].year);fillMonths();
+  }catch(e){status('Ne morem prebrati seznama mesecev: '+e.message,true)}
 }
 function fillMonths(){const y=+$('year').value,m=$('month');m.innerHTML='';files.filter(f=>f.year===y).forEach(f=>m.add(new Option(months[f.month],f.month)));m.disabled=false;if(m.options.length){m.selectedIndex=m.options.length-1;loadMonth()}}
 function parse(text){
@@ -141,18 +53,19 @@ function parse(text){
  return result.sort((a,b)=>a.Day-b.Day);
 }
 async function loadMonth(){
- year=+$('year').value;month=+$('month').value;const f=files.find(x=>x.year===year&&x.month===month);if(!f)return;
- status('Nalagam '+f.name+' ...');
- try{
- const metadata=await(await graph('/me/drive/items/'+encodeURIComponent(f.id))).json();
- const downloadUrl=metadata['@microsoft.graph.downloadUrl'];
- if(!downloadUrl)throw new Error('OneDrive ni vrnil povezave za prenos datoteke.');
- const r=await fetch(downloadUrl);if(!r.ok)throw new Error('Prenos datoteke: HTTP '+r.status);
- const bytes=await r.arrayBuffer();let txt=new TextDecoder('utf-8').decode(bytes);if(txt.includes('\uFFFD'))txt=new TextDecoder('windows-1250').decode(bytes);
- rows=parse(txt);selectedDay=rows.length?rows[rows.length-1].Day:1;
- $('day').max=new Date(year,month,0).getDate();$('day').value=selectedDay;
- status(f.name+' | '+rows.length+' dni');renderStats();renderDay();requestAnimationFrame(draw);
- }catch(e){status('Napaka v '+f.name+': '+e.message,true)}
+  year=+$('year').value;month=+$('month').value;
+  const f=files.find(x=>x.year===year&&x.month===month);if(!f)return;
+  status('Nalagam '+f.name+' ...');
+  try{
+    const r=await fetch(githubRaw+encodeURIComponent(f.name),{cache:'no-store'});
+    if(!r.ok)throw new Error('GitHub HTTP '+r.status);
+    const bytes=await r.arrayBuffer();
+    let txt=new TextDecoder('utf-8').decode(bytes);
+    if(txt.includes('\uFFFD'))txt=new TextDecoder('windows-1250').decode(bytes);
+    rows=parse(txt);selectedDay=rows.length?rows[rows.length-1].Day:1;
+    $('day').max=new Date(year,month,0).getDate();$('day').value=selectedDay;
+    status(f.name+' | '+rows.length+' dni');renderStats();renderDay();requestAnimationFrame(draw);
+  }catch(e){status('Napaka v '+f.name+': '+e.message,true)}
 }
 function renderStats(){
  $('statsTitle').textContent='MIN / MAX – '+months[month]+' '+year;
@@ -167,7 +80,7 @@ function pointerDay(e){if(!rows.length)return;const r=$('chart').getBoundingClie
 function draw(){
  const c=$('chart'),r=c.getBoundingClientRect();if(!r.width||!r.height)return;const dpr=Math.min(2,devicePixelRatio||1);c.width=Math.round(r.width*dpr);c.height=Math.round(r.height*dpr);const ctx=c.getContext('2d');ctx.scale(dpr,dpr);
  const w=r.width,h=r.height,L=49,R=14,T=15,B=34,pw=Math.max(10,w-L-R),ph=Math.max(10,h-T-B);
- ctx.clearRect(0,0,w,h);if(!rows.length){ctx.fillStyle='#6b7890';ctx.textAlign='center';ctx.fillText('Preizkus povezave OneDrive',w/2,h/2);return}
+ ctx.clearRect(0,0,w,h);if(!rows.length){ctx.fillStyle='#6b7890';ctx.textAlign='center';ctx.fillText('Ni podatkov za prikaz',w/2,h/2);return}
  let lo=Infinity,hi=-Infinity;for(const row of rows)for(const s of sensors)for(const k of [s[2],s[3]])if(row[k]!==null){lo=Math.min(lo,row[k]);hi=Math.max(hi,row[k])}if(!Number.isFinite(lo)){lo=0;hi=40}lo=Math.floor(lo-1);hi=Math.ceil(hi+1);if(hi===lo)hi=lo+1;
  const days=new Date(year,month,0).getDate(),px=day=>L+(day-1)/(days-1)*pw,py=v=>T+(hi-v)/(hi-lo)*ph;
  ctx.font='12px system-ui';ctx.lineWidth=1;ctx.textAlign='right';for(let i=0;i<=5;i++){const v=lo+(hi-lo)*i/5,y=py(v);ctx.strokeStyle='#e4eaf2';ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(w-R,y);ctx.stroke();ctx.fillStyle='#53657b';ctx.fillText(v.toFixed(0)+'°',L-6,y+4)}
